@@ -15,7 +15,7 @@ pub mod movement {
         pub angular: f64,
     }
 
-    pub trait Move {
+    pub trait MovementStrategy {
         fn execute(&self, actor: &(impl Kinematic + Motor)) -> Output;
     }
 
@@ -23,9 +23,23 @@ pub mod movement {
         pub target: Vec2,
     }
 
-    impl Move for Seek {
+    impl MovementStrategy for Seek {
         fn execute(&self, actor: &(impl Kinematic + Motor)) -> Output {
             let direction = self.target - actor.position();
+            Output {
+                linear: direction.normalize() * actor.max_linear_acceleration(),
+                angular: 0.0,
+            }
+        }
+    }
+
+    pub struct Flee {
+        pub target : Vec2
+    }
+
+    impl MovementStrategy for Flee {
+        fn execute(&self, actor: &(impl Kinematic + Motor)) -> Output {
+            let direction = actor.position() - self.target;
             Output {
                 linear: direction.normalize() * actor.max_linear_acceleration(),
                 angular: 0.0,
@@ -44,8 +58,8 @@ impl Ship {
         Ship {}
     }
     pub fn tick(&mut self) {
-        let action = Seek { target: target() };
-        let result = action.execute(self);
+        let action = Flee { target: target() };
+        let result  = action.execute(self);
         accelerate(result.linear);
     }
 }
