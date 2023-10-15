@@ -1,6 +1,6 @@
 pub mod movement {
     use oort_api::prelude::*;
-    use std::time::Duration;
+    use std::{collections::HashMap, time::Duration};
 
     pub trait Kinematic {
         fn position(&self) -> Vec2;
@@ -19,10 +19,10 @@ pub mod movement {
             25.0
         }
         fn slow_angle(&self) -> f64 {
-            self.max_angular_acceleration() / 180.0
+            TAU / 2.0
         }
         fn stop_angle(&self) -> f64 {
-            self.max_angular_acceleration() / 360.0
+            self.max_angular_acceleration() / 720.0
         }
         fn time_to_target(&self) -> Duration {
             Duration::from_secs_f64(0.1)
@@ -30,7 +30,7 @@ pub mod movement {
     }
 
     pub trait MovementStrategy {
-        fn execute(&self, motor: &impl Motor) -> Option<(Vec2, f64)>;
+        fn execute(&self, motor: &dyn Motor) -> Option<(Vec2, f64)>;
     }
 
     pub struct Seek {
@@ -38,7 +38,7 @@ pub mod movement {
     }
 
     impl MovementStrategy for Seek {
-        fn execute(&self, motor: &impl Motor) -> Option<(Vec2, f64)> {
+        fn execute(&self, motor: &dyn Motor) -> Option<(Vec2, f64)> {
             let direction = self.target - motor.position();
             match direction.length() {
                 len if len == 0.0 => None,
@@ -52,7 +52,7 @@ pub mod movement {
     }
 
     impl MovementStrategy for Flee {
-        fn execute(&self, motor: &impl Motor) -> Option<(Vec2, f64)> {
+        fn execute(&self, motor: &dyn Motor) -> Option<(Vec2, f64)> {
             let direction = motor.position() - self.target;
             match direction.length() {
                 len if len == 0.0 => None,
@@ -66,7 +66,7 @@ pub mod movement {
     }
 
     impl MovementStrategy for Arrive {
-        fn execute(&self, motor: &impl Motor) -> Option<(Vec2, f64)> {
+        fn execute(&self, motor: &dyn Motor) -> Option<(Vec2, f64)> {
             let direction = self.target - motor.position();
             let magnitude = match direction.length() {
                 radius if radius <= motor.stop_radius() => return None,
@@ -86,7 +86,7 @@ pub mod movement {
     }
 
     impl MovementStrategy for Align {
-        fn execute(&self, motor: &impl Motor) -> Option<(Vec2, f64)> {
+        fn execute(&self, motor: &dyn Motor) -> Option<(Vec2, f64)> {
             let direction = angle_diff(motor.orientation(), self.target);
             let magnitude = match direction.abs() {
                 angle if angle <= motor.stop_angle() => return None,
@@ -109,12 +109,31 @@ pub mod movement {
     }
 
     impl MovementStrategy for Face {
-        fn execute(&self, actor: &impl Motor) -> Option<(Vec2, f64)> {
+        fn execute(&self, actor: &dyn Motor) -> Option<(Vec2, f64)> {
             let direction = self.target - actor.position();
             let delegate = Align {
                 target: direction.angle(),
             };
             delegate.execute(actor)
+        }
+    }
+
+    pub struct MovementBlend {
+        pub moves: Vec<(Box<dyn MovementStrategy>, f64)>,
+    }
+
+    impl MovementStrategy for MovementBlend {
+        fn execute(&self, motor: &dyn Motor) -> Option<(Vec2, f64)> {
+            self.moves
+                .iter()
+                .filter_map(|(movement, weight)| {
+                    movement.execute(motor).and_then(|(linear, angular)| {
+                        Some((linear * weight.clone(), angular * weight))
+                    })
+                })
+                .reduce(|(sum_linear, sum_angular), (linear, angular)| {
+                    (sum_linear + linear, sum_angular + angular)
+                })
         }
     }
 }
@@ -129,10 +148,21 @@ impl Ship {
         Ship {}
     }
     pub fn tick(&mut self) {
-        let movement = Seek { target: target() };
+        let movement = MovementBlend {
+            moves: vec![
+                (Box::new(Seek { target: target() }), 1.0),
+                (Box::new(Face { target: target() }), 1.0),
+            ],
+        };
         if let Some((linear, angular)) = movement.execute(self) {
             accelerate(linear);
             torque(angular);
+        }
+		draw_diamond(target(), 15.0, 0xff0000);
+        let direction = target() - self.position();
+        let angle = angle_diff(direction.angle(), self.orientation());
+        if angle.abs() <= TAU / 360.0 {
+            fire(0);
         }
     }
 }
