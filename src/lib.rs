@@ -7,6 +7,28 @@ pub mod movement {
         fn velocity(&self) -> Vec2;
         fn orientation(&self) -> f64;
         fn rotation(&self) -> f64;
+        fn at_time(&self, t: Duration) -> Vec2 {
+            self.position() + self.velocity() * t.as_secs_f64()
+        }
+        fn lead(&self, cannon: Vec2, projectile_speed: f64) -> Option<Vec2> {
+            let a =
+                self.velocity().x.powi(2) + self.velocity().y.powi(2) - projectile_speed.powi(2);
+            let b = 2.0
+                * (self.velocity().x * (self.position().x - cannon.x)
+                    + self.velocity().y * (self.position().y - cannon.y));
+            let c = (self.position().x - cannon.x).powi(2) + (self.position().y - cannon.y).powi(2);
+            let disc = b.powi(2) - 4.0 * a * c;
+            if disc < 0.0 {
+                return None;
+            }
+            let t1 = (-b + disc.sqrt()) / (2.0 * a);
+            let t2 = (-b - disc.sqrt()) / (2.0 * a);
+            let t = [t1, t2].into_iter().filter(|t| t > &0.0).reduce(f64::min);
+            match t {
+                Some(t) => Some(self.at_time(Duration::from_secs_f64(t))),
+                None => None,
+            }
+        }
     }
 
     pub trait Motor: Kinematic {
@@ -138,8 +160,30 @@ pub mod movement {
     }
 }
 
+use std::time::Duration;
+
 use movement::*;
 use oort_api::prelude::*;
+
+struct TutorialTarget {}
+
+impl Kinematic for TutorialTarget {
+    fn position(&self) -> Vec2 {
+        target()
+    }
+
+    fn velocity(&self) -> Vec2 {
+        target_velocity()
+    }
+
+    fn orientation(&self) -> f64 {
+        0.0
+    }
+
+    fn rotation(&self) -> f64 {
+        0.0
+    }
+}
 
 pub struct Ship {}
 
@@ -148,18 +192,22 @@ impl Ship {
         Ship {}
     }
     pub fn tick(&mut self) {
+        let dummy = TutorialTarget {};
+        let target = dummy
+            .lead(self.position(), 1000.0)
+            .unwrap_or(dummy.position());
         let movement = MovementBlend {
             moves: vec![
-                (Box::new(Seek { target: target() }), 1.0),
-                (Box::new(Face { target: target() }), 1.0),
+                (Box::new(Seek { target }), 1.0),
+                (Box::new(Face { target }), 1.0),
             ],
         };
         if let Some((linear, angular)) = movement.execute(self) {
             accelerate(linear);
             torque(angular);
         }
-		draw_diamond(target(), 15.0, 0xff0000);
-        let direction = target() - self.position();
+        draw_diamond(target, 15.0, 0xff0000);
+        let direction = target - self.position();
         let angle = angle_diff(direction.angle(), self.orientation());
         if angle.abs() <= TAU / 360.0 {
             fire(0);
