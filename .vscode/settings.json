@@ -1,6 +1,9 @@
 {
 	"cSpell.words": [
+		"Kalman",
+		"oorandom",
 		"powi",
 		"spacepoort"
-	]
+	],
+	"editor.formatOnSave": true
 }
