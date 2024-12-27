@@ -1,40 +1,33 @@
+use maths_rs::prelude::*;
+use oort_api::prelude::*;
+
 pub mod movement {
-    use maths_rs::prelude::{deg_to_rad, Base};
-    use oort_api::prelude::*;
+
+    use super::*;
     use std::time::Duration;
 
-    pub trait Vector {
-        fn sq_length(&self) -> f64;
-    }
-
-    impl Vector for Vec2 {
-        fn sq_length(&self) -> f64 {
-            self.x.powi(2) + self.y.powi(2)
-        }
-    }
-
     pub trait Kinematic {
-        fn position(&self) -> Vec2;
-        fn velocity(&self) -> Vec2;
+        fn position(&self) -> Vec2d;
+        fn velocity(&self) -> Vec2d;
         fn orientation(&self) -> f64;
         fn rotation(&self) -> f64;
-        fn forward(&self) -> Vec2 {
-            Vec2::new(1.0, 0.0).rotate(self.orientation())
+        fn forward(&self) -> Vec2d {
+            Vec2d::unit_x().rotate(self.orientation())
         }
         fn speed(&self) -> f64 {
             self.velocity().length()
         }
-        fn at_time(&self, time: Duration) -> Vec2 {
+        fn at_time(&self, time: Duration) -> Vec2d {
             self.position() + self.velocity() * time.as_secs_f64()
         }
-        fn lead_time(&self, cannon: Vec2, projectile_speed: f64) -> Option<Duration> {
-            let a = self.velocity().sq_length() - projectile_speed.powi(2);
+        fn lead_time(&self, cannon: Vec2d, projectile_speed: f64) -> Option<Duration> {
+            let a = self.speed() - projectile_speed;
             let dp = self.position() - cannon;
             let b = 2.0 * self.velocity().dot(dp);
-            let c = dp.sq_length();
-            let disc = b.powi(2) - 4.0 * a * c;
-            match disc {
-                _ if disc < 0.0 => None,
+            let c = Vec2d::mag2(dp);
+            let discriminant = b.powi(2) - 4.0 * a * c;
+            match discriminant {
+                _ if discriminant < 0.0 => None,
                 disc => [1.0, -1.0]
                     .iter()
                     .map(|sign| (-b + sign * disc.sqrt()) / (2.0 * a))
@@ -43,7 +36,7 @@ pub mod movement {
                     .map(|t| Duration::from_secs_f64(t)),
             }
         }
-        fn lead_position(&self, cannon: Vec2, projectile_speed: f64) -> Option<Vec2> {
+        fn lead_position(&self, cannon: Vec2d, projectile_speed: f64) -> Option<Vec2d> {
             self.lead_time(cannon, projectile_speed)
                 .map(|t| self.at_time(t))
         }
@@ -70,15 +63,15 @@ pub mod movement {
     }
 
     pub trait MovementStrategy {
-        fn execute(&mut self, motor: &dyn Motor) -> Option<(Vec2, f64)>;
+        fn execute(&mut self, motor: &dyn Motor) -> Option<(Vec2d, f64)>;
     }
 
     pub struct Seek {
-        pub target: Vec2,
+        pub target: Vec2d,
     }
 
     impl MovementStrategy for Seek {
-        fn execute(&mut self, motor: &dyn Motor) -> Option<(Vec2, f64)> {
+        fn execute(&mut self, motor: &dyn Motor) -> Option<(Vec2d, f64)> {
             draw_diamond(self.target, 15.0, 0xffff00);
             let direction = self.target - motor.position();
             match direction.length() {
@@ -89,11 +82,11 @@ pub mod movement {
     }
 
     pub struct Flee {
-        pub target: Vec2,
+        pub target: Vec2d,
     }
 
     impl MovementStrategy for Flee {
-        fn execute(&mut self, motor: &dyn Motor) -> Option<(Vec2, f64)> {
+        fn execute(&mut self, motor: &dyn Motor) -> Option<(Vec2d, f64)> {
             let direction = motor.position() - self.target;
             match direction.length() {
                 len if len == 0.0 => None,
@@ -103,11 +96,11 @@ pub mod movement {
     }
 
     pub struct Arrive {
-        pub target: Vec2,
+        pub target: Vec2d,
     }
 
     impl MovementStrategy for Arrive {
-        fn execute(&mut self, motor: &dyn Motor) -> Option<(Vec2, f64)> {
+        fn execute(&mut self, motor: &dyn Motor) -> Option<(Vec2d, f64)> {
             let direction = self.target - motor.position();
             let magnitude = match direction.length() {
                 radius if radius <= motor.stop_radius() => return None,
@@ -127,7 +120,7 @@ pub mod movement {
     }
 
     impl MovementStrategy for Align {
-        fn execute(&mut self, motor: &dyn Motor) -> Option<(Vec2, f64)> {
+        fn execute(&mut self, motor: &dyn Motor) -> Option<(Vec2d, f64)> {
             /* let braking_time =
                 Duration::from_secs_f64(motor.rotation().abs() / motor.max_angular_acceleration());
             let stop_angle = motor.orientation()
@@ -153,7 +146,7 @@ pub mod movement {
             match delta_rotation {
                 _ if delta_rotation == 0.0 => None,
                 _ => Some((
-                    Vec2::default(),
+                    Vec2d::default(),
                     delta_rotation / motor.time_to_target().as_secs_f64(),
                 )),
             }
@@ -161,11 +154,11 @@ pub mod movement {
     }
 
     pub struct Face {
-        pub target: Vec2,
+        pub target: Vec2d,
     }
 
     impl MovementStrategy for Face {
-        fn execute(&mut self, motor: &dyn Motor) -> Option<(Vec2, f64)> {
+        fn execute(&mut self, motor: &dyn Motor) -> Option<(Vec2d, f64)> {
             let direction = self.target - motor.position();
             draw_line(
                 motor.position(),
@@ -178,7 +171,7 @@ pub mod movement {
                 0xffffff,
             );
             match direction {
-                _ if direction == Vec2::zero() => None,
+                _ if direction == Vec2d::zero() => None,
                 _ => Align {
                     target: direction.angle(),
                 }
@@ -188,11 +181,11 @@ pub mod movement {
     }
 
     pub struct MatchVelocity {
-        pub target: Vec2,
+        pub target: Vec2d,
     }
 
     impl MovementStrategy for MatchVelocity {
-        fn execute(&mut self, motor: &dyn Motor) -> Option<(Vec2, f64)> {
+        fn execute(&mut self, motor: &dyn Motor) -> Option<(Vec2d, f64)> {
             Some((
                 (self.target - motor.velocity()) / motor.time_to_target().as_secs_f64(),
                 0.0,
@@ -206,7 +199,7 @@ pub mod movement {
     }
 
     impl MovementStrategy for Pursue {
-        fn execute(&mut self, motor: &dyn Motor) -> Option<(Vec2, f64)> {
+        fn execute(&mut self, motor: &dyn Motor) -> Option<(Vec2d, f64)> {
             let direction = self.target.position() - motor.position();
             let prediction =
                 if motor.speed() <= direction.length() / self.max_prediction.as_secs_f64() {
@@ -227,7 +220,7 @@ pub mod movement {
     }
 
     impl MovementStrategy for Evade {
-        fn execute(&mut self, motor: &dyn Motor) -> Option<(Vec2, f64)> {
+        fn execute(&mut self, motor: &dyn Motor) -> Option<(Vec2d, f64)> {
             let direction = self.target.position() - motor.position();
             let prediction =
                 if motor.speed() <= direction.length() / self.max_prediction.as_secs_f64() {
@@ -245,7 +238,7 @@ pub mod movement {
     pub struct FaceForward {}
 
     impl MovementStrategy for FaceForward {
-        fn execute(&mut self, motor: &dyn Motor) -> Option<(Vec2, f64)> {
+        fn execute(&mut self, motor: &dyn Motor) -> Option<(Vec2d, f64)> {
             match motor.speed() {
                 speed if speed == 0.0 => None,
                 _ => Align {
@@ -264,11 +257,11 @@ pub mod movement {
     }
 
     impl MovementStrategy for Wander {
-        fn execute(&mut self, motor: &dyn Motor) -> Option<(Vec2, f64)> {
+        fn execute(&mut self, motor: &dyn Motor) -> Option<(Vec2d, f64)> {
             self.orientation += rand(-1.0, 1.0) * self.rate * TICK_LENGTH;
             let circle_center = motor.position() + motor.forward() * self.offset;
             let target_position = circle_center
-                + Vec2::new(1.0, 0.0).rotate(motor.orientation() + self.orientation) * self.radius;
+                + Vec2d::new(1.0, 0.0).rotate(motor.orientation() + self.orientation) * self.radius;
             draw_polygon(circle_center, self.radius, 20, 0.0, 0xffffff);
             draw_diamond(target_position, 1.0, 0xffffff);
             Some((
@@ -276,13 +269,13 @@ pub mod movement {
                     target: target_position,
                 }
                 .execute(motor)
-                .unwrap_or((Vec2::zero(), 0.0))
+                .unwrap_or((Vec2d::zero(), 0.0))
                 .0,
                 Seek {
                     target: target_position,
                 }
                 .execute(motor)
-                .unwrap_or((Vec2::zero(), 0.0))
+                .unwrap_or((Vec2d::zero(), 0.0))
                 .1,
             ))
         }
@@ -293,7 +286,7 @@ pub mod movement {
     }
 
     impl MovementStrategy for MovementBlend {
-        fn execute(&mut self, motor: &dyn Motor) -> Option<(Vec2, f64)> {
+        fn execute(&mut self, motor: &dyn Motor) -> Option<(Vec2d, f64)> {
             self.moves
                 .iter_mut()
                 .filter_map(|(movement, weight)| {
@@ -310,8 +303,6 @@ pub mod movement {
 
 pub mod perception {
     use std::time::Duration;
-
-    use maths_rs::prelude::Cast;
 
     struct Kalman {
         count: u32,
@@ -459,82 +450,86 @@ pub mod perception {
     }
 }
 
-use movement::*;
-use oort_api::prelude::{maths_rs::deg_to_rad, *};
+pub mod tutorial {
+    use super::*;
+    use crate::movement::*;
 
-struct TutorialTarget {}
+    struct TutorialTarget {}
 
-impl Kinematic for TutorialTarget {
-    fn position(&self) -> Vec2 {
-        target()
-    }
-
-    fn velocity(&self) -> Vec2 {
-        target_velocity()
-    }
-
-    fn orientation(&self) -> f64 {
-        0.0
-    }
-
-    fn rotation(&self) -> f64 {
-        0.0
-    }
-}
-
-pub struct Ship {}
-
-impl Kinematic for Ship {
-    fn position(&self) -> Vec2 {
-        oort_api::prelude::position()
-    }
-    fn velocity(&self) -> Vec2 {
-        oort_api::prelude::velocity()
-    }
-    fn orientation(&self) -> f64 {
-        oort_api::prelude::heading()
-    }
-    fn rotation(&self) -> f64 {
-        oort_api::prelude::angular_velocity()
-    }
-}
-
-impl Motor for Ship {
-    fn max_linear_acceleration(&self) -> f64 {
-        [
-            max_forward_acceleration(),
-            max_backward_acceleration(),
-            max_lateral_acceleration(),
-        ]
-        .into_iter()
-        .reduce(f64::max)
-        .unwrap()
-    }
-    fn max_angular_acceleration(&self) -> f64 {
-        oort_api::prelude::max_angular_acceleration()
-    }
-}
-
-impl Ship {
-    pub fn new() -> Ship {
-        Ship {}
-    }
-    pub fn tick(&mut self) {
-        let dummy = Box::new(TutorialTarget {});
-        let target = dummy
-            .lead_position(self.position(), 925.0)
-            .unwrap_or(dummy.position());
-        let mut movement = Face { target };
-        if let Some((linear, angular)) = movement.execute(self) {
-            accelerate(linear);
-            torque(angular);
+    impl Kinematic for TutorialTarget {
+        fn position(&self) -> Vec2d {
+            target()
         }
-        draw_diamond(target, 15.0, 0xff0000);
-        let direction = target - self.position();
-        let angle = angle_diff(direction.angle(), self.orientation());
-        if angle.abs() <= deg_to_rad(2.0) {
-            // activate_ability(Ability::Boost);
-            fire(0);
+
+        fn velocity(&self) -> Vec2d {
+            target_velocity()
+        }
+
+        fn orientation(&self) -> f64 {
+            0.0
+        }
+
+        fn rotation(&self) -> f64 {
+            0.0
         }
     }
+
+    pub struct Ship {}
+
+    impl Kinematic for Ship {
+        fn position(&self) -> Vec2d {
+            oort_api::prelude::position()
+        }
+        fn velocity(&self) -> Vec2d {
+            oort_api::prelude::velocity()
+        }
+        fn orientation(&self) -> f64 {
+            oort_api::prelude::heading()
+        }
+        fn rotation(&self) -> f64 {
+            oort_api::prelude::angular_velocity()
+        }
+    }
+
+    impl Motor for Ship {
+        fn max_linear_acceleration(&self) -> f64 {
+            [
+                max_forward_acceleration(),
+                max_backward_acceleration(),
+                max_lateral_acceleration(),
+            ]
+            .into_iter()
+            .reduce(f64::max)
+            .unwrap()
+        }
+        fn max_angular_acceleration(&self) -> f64 {
+            oort_api::prelude::max_angular_acceleration()
+        }
+    }
+
+    impl Ship {
+        pub fn new() -> Ship {
+            Ship {}
+        }
+        pub fn tick(&mut self) {
+            let dummy = Box::new(TutorialTarget {});
+            let target = dummy
+                .lead_position(self.position(), 925.0)
+                .unwrap_or(dummy.position());
+            let mut movement = Face { target };
+            if let Some((linear, angular)) = movement.execute(self) {
+                accelerate(linear);
+                torque(angular);
+            }
+            draw_diamond(target, 15.0, 0xff0000);
+            let direction = target - self.position();
+            let angle = angle_diff(direction.angle(), self.orientation());
+            if angle.abs() <= deg_to_rad(2.0) {
+                // activate_ability(Ability::Boost);
+                fire(0);
+            }
+        }
+    }
 }
+
+pub use tutorial::Ship;
